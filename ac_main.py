@@ -2,6 +2,7 @@
 # by KurumiRan
 # python version: 3.13
 # upload to Github Codespace already
+# And already can code by iPad now 
 
 import requests
 
