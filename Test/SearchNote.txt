@@ -1,0 +1,117 @@
+登录请求到 https://jwjx.gxnu.edu.cn/wfw/manager之后
+
+会跳转URL：
+https://sso.gxnu.edu.cn/cas/login?service=
+    https://jwjx.gxnu.edu.cn/sso/login/3rd/432?referer=https%3A%2F%2Fjwjx.gxnu.edu.cn%2Fwfw%2Fmanage
+
+在sso界面的登录实现是向这个原本跳转的URL发送POST请求，表单数据是：
+    username 用户输入的学号/工号
+
+    mobileCode 不知道是什么，但是一般会有明文的密码在这里作为值
+
+    password
+            密码，但是会使用RSA加密，其中会使用 Modulus（RSA模数）和 public_exponent （公钥指数）来作为参数创建RSA密钥对
+            这个 Modulus 和 public_exponent 会从 URL https://sso.gxnu.edu.cn/cas/v2/getPubKey 的 GET 请求中获取
+            在这个请求返回的响应内容就是 modulus 和 exponent 这两个键值对内容，其中的 exponent 似乎固定位 10001
+            这个 URL 貌似普通的 GET 请求就可以请求到，不需要什么 cookie ，header 之类的貌似
+
+    authcode 不知道， 一般为 “”， 即空白字符串
+
+    rememberMe 对应页面上的是否 “记住我”，值一般为 “true”
+
+    execution
+            CAS协议中的执行令牌(Execution Token)，用于防止CSRF攻击
+            有两部分组成：
+                1. 比如 644bb3a9-d289-40ad-ae36-bed672e86cc5_ ：UUID前缀
+                2. 长字符串：Base64编码的JWT（JSON Web Token）
+                    比如：
+                        {
+                            "alg": "HS256",
+                            "typ": "JWT",
+                            "jti": "6449c2d3-e2b5-40c4-b683-ed40f66645b0",
+                            "sub": "2024xxxxx038",
+                            "authorities": [],
+                            "iss": "https://sso.gxnu.edu.cn/cas",
+                            "iat": 1726189924,
+                            "exp": 1726193524
+                        }
+
+                    其中：
+                            jti：JWT唯一标识符
+                            sub：主题（即用户学号）
+                            iss：签发者（SSO系统）
+                            iat：签发时间（2024-09-13 00:00:00 UTC）
+                            exp：过期时间（2024-09-13 01:00:00 UTC）
+                                这个 签发时间 和 过期时间 貌似都是相差一个小时整，
+                                也就是说有效期为一个小时（有效期可能是取决于这里？不清楚）
+
+            获取方式为：
+                这个值是 CAS 登录页面的一个隐藏表单字段，它通常在 login 这个 HTML 也就是sso的登录界面的HTML中，
+                ！注意：获取 execution 时，必须使用 同一个 Session 对象 去请求登录页面。
+                        因为 execution 令牌是与服务器端的会话（Session）绑定的，
+                        如果用不同的会话去获取 execution 和提交表单，会导致CSRF验证失败。
+                可以用 bs4 或者 lxml 提取出来，
+                HTML 代码通常为：
+                    <input type="hidden" name="execution" value="这里是 execution 的值" />
+
+
+    _eventId 通常为 “submit”，表示提交登录
+
+    示例：
+    username : 1234567
+    mobileCode : impassword
+    password : 7ad9acf73b012b25ffa3a9925135ef49f393f846e6724bcc518c9c9d13608a28857782ff87900b44b23270df40ce08ec4ece20117bf07c2aaaa50e89c37b9692
+    authcode :
+    rememberMe : true
+    execution : 8099a4e8-2bda-43d2-a6b5-ea2a0de4d779_ZXlKaGJHY2lPaUpJVXpVeE1pSjkuV0doblNGWnpTbFZPUTBSMWN6RlFVR2xhWW14SmJrUlNiVk01YUVkc1dtWTBVRWhTUTBwQ2R5dGtZelowZG5WUGJrd3ZRMDl6VUdGcVkzTnpNM0ZqU0hSTGVXRnNlVmRCVlhoVWMwRlVZbXA2VEVkd1JGTkViVkZJWm5KcWNXbFdlVmxNYjBrd1ZrOW1aR1ZzUTBvelVrVlNXV1pvUmxCMUt6UjNLMkZzUjNaNlFYbGpja3R5UjNwWVFVeHlVMEZIWkVGUmNYY3ZLemxsZW10alJXbGtWamhrTW1Gbk1FVjJSM2NyZUhKSGRIVXhNVlp4VkVoaE56a3phekZhTlM5emRHMURPV1pTWVRZM2NFb3ZiMmRoVmxBM1VXVjBlRlJuTWpKT2RtZFVNUzk2UlM5aUsyRjBVSFJKWkV4VlJ6RjRSMk12WkhsMmFHaFVSRzVVZERZMGNEVm5Wa2hTTWpsMGJXOUJUbkZRVkhoQ1dsWlJkemMxYm0xMVJsaHllVnAxYjJ3NFoxZFdRbkZrYkV0M09UTlZPRzVKVVdOYVlqTktWMmhLWVZSVFEyTkhia3gzU0dKalQxSnllVk42U0ZOblVHOVBZVVJXVm0xbmVUTkZNM3BITm5RNGNFSjNSVnBoT1dweGVURjZhVUVyY1ROUE1IRklOV2x3U2tSV2F5dHRNM1pMY2tocWFrYzFTRmREV1ZGVlMxY3pSelU0UlRSVmJUWlZNMWt2Y2xFd2NVVlhRMmRHY1ZGdVEwWjRSWEJUVGpCa1VTOVpNR2RwWkdGemMzUTBhSG96Y21GeWFXRndkWHBCTkU1aVdGZGtWMDl0V1RBMFRHTnBiVXR1VHpCYVlYZGpVamQxTlRKWU1IZFVTVWQ2YlhWc00weENRMVkwT0RaV1VITmpiVlZuU0ZBMVoyOVdRV2MwVmtnMWRIbDJNREJST1hkVFpERTRZV0V2ZFVaa01IbHlkVGh4Tm5CWVpGUlhPVkIwTjBkVlRFOWFTR3BWZFVkRFVsWXhXRll6TDFCVlRrUnFObXBMTkZSdFUzbzFiM0o0WW5Sd1NXWkNkMk55Vlc5MmJYaFZjRkpuYVU1NlUxcEpOMVV3Wm5GeVEyRlVNRkJhZG5GdmFXSlJVSHBRZEZwd01XSlRUelZJYzJ4U1MwcDJVVlZsVTA5Q1YySldUQzlLZVhRMlprdHdaek5EY0dadmVsVkxSVzV4TjFGWmJ5dHZOV05tZDNWVU5HNDNXakY2Y0VKUFpWbDNkbUl4UkRaWVdUUkxibWx4Unl0aGNIRTVTWEF3WkZwaWJTdEhhMjFxTkc1a1VXY3lOVlU1ZVd0VFZ6SkZhSEI0ZGpoR1JEVkVNMmt3Y0dKR1drd3JjRUpuTWpSV2JIcFFWMkoyYUdwbGNIaFliWFpFVFhWUFZWRkZOa0pLUmsxNlNXbGlkRXB3ZFVaSk0yWmxWSGRZTm1WWVlsVjRVbkpaYlcwdmJtVmpXVEYzUTJKM1dtaHNXV3RYY1daeWJuQnpRMU0xTWtGNFlVSlFibm8zVTJ4NVNubFVkMWwwY1ZWRk5FaHliSHBDZDFCdFJrazBMekJVZERaTk5qUkxlRUZtZW10TVpqbEtaVkk0YWtSU05YZ3JkbVlyYzFWdFlucFlZMDV0VEZaTlVUQklWbTVKYkVOS2JIcHFSbkJqZUdReWNGZDBSVkVyUzFkTWRqQnJWa2RtVkVaYWR6WXZaa2MxV1VOQlYyUnJLMjUyZGtZdk4wTlNNakI2TkhaU1FVdG1VVzVUVjBnNFZsRmlXRTh3Y1RCVVZteFRibGhXYjBRdmFqWlZVSFIyYzBob1EwUm5XRUUyWTB4R01EUndOSHAwU1ROdVlqSkVWbll6U1ZsMFVVUmhaVlk0WjFsUVVGWjZWemxLUWtkaWJHUlhWM0E1T1V0MVltUklMMjV2VlhkRFQxSjBVV3RLU1hWU1VEWkhRaTlXTTJ0TE5EQk5iemx2YlhoWGN6RTFXRU5CYTBReE9GaEVUaTlGTm5oVWQwVkxhRkpyVVRoT2NWTlZUSG8wVDI5bldERm9SR1ZrVjFKdFJFbHpNR1Z0VTFZcmNrWTNRa0lyVlV0emVHUlFOMjlIUjBKUE5XSmtVRXhKWkdKMloxbzJVMWg0ZW01SFoxUndVWGc0TlVSUmFGaFVhVXBDV1dwWlJHVXdVa3B6TW1ZeGVWbzFhMUUwU1daU2RFcHdiU3RYS3paSFdrNUxXRWQ1TTJFMmQySnFkSGxvTWpaTmFsRXpUa1ZxVFVobFVIWTJibU5JYmpNM1FsaHlLMGRXSzFoVlJEUjZUM2RwVDFoRFpYaFJSRlZwTldaNllVdFhLMjlzVjJSQlpGUndTemd4UVZBNUwxb3ZhbE5pT0cwNFRFRlZNRVp6V25kWmNVcG9VRXBLYkU1S2JsVmFkakZqTkc5c2EzbGphMlZMZFRWc2RIUldlaXR0YUhkMVZVWkhNWHA1VG05b2IxcFJPVmxMVnk4M1dtMXJRa1JxV0VnemFIZ3dOMWRNUkd0dFpFSldVRlZ0UzNKRVMzaFdhVVo1VGpBNWMxRlJZVzVJVjNCU05TOHdjRFYyV1VacFEyWktTRXR3SzJWcGNHTXZNMDV2V2xNMmVESnFZMU5DTTA5VU1YSnVXbEExV1doblkzTXhMME5xTWxGNFdVNVBSazB2WW5OelNsWkJlRGQzUlV3MmFWUmlWMFZYWlhaWFprZG1VQzluTjNOS2NIbGxUVkJ1ZVhkTGRYQkZSVU5QSzNaWEsyNUdXVXRTVFcxblYzb3lLMnQwVTJGNVFsbEtaRTh3TlhkM2QwMVJTVzE2ZWpGQ1NWSTBUeXMxYmsxMlFuaDFhalpJWTJGaWFuVlRlV2cxU2twV2RWVXdSQ3R2V1ZsQlFqaHZZVGd6YVZGR2NrWlRiR1ZDZEZvMldXSm9RU3RPU0ZObVlYVnFjamhCUkc1VFJUSTVWRWw1VVhkb1NYTldRa3hPZW5wMGRUTkdjVTh6ZVZoR2VubGFTRkZsZEdwdU1rdHFORkZRVEdsT2RrNTBSSGMxVjJSd1VIZGlNVXBJVTNKNlNUYzVObkZ3SzFOcGFrSXlWamd3VVhOWUx5dFNTVFpST1hNdmNHODBXSFlyTURWbE5uUmlVR2xXWWtsR05XZ3lkMWxoYmpCaVZHb3hOVkE0VlhGalprWjZiVTl1Ulc4Mk1WZElabEV5YjJSbGVrOXdRVk5sUlVoaVVGcDVNRGQwZUVoTlppOXdaRlYwVmtwU1lrMVJPRUpZV1hGTE4xSTJjMlJrWldwVVZXdE5aMlZ6T0hkNlNIRnRURk54V2lzeVYwVjZRM2wwWjNscll6Z3lNV2hqVkRRMGJGQkhRazVUZGpkSEsxSTJiRGhNT1ZWd2NEUnpkMVI0UVd0VVJuUXJRMHBMYmtaR1dHbHNZV2xVZEVKR1Qxa3JWVmxKVFN0SmNYUnhRbVkxVEZNdk4wMVBORUppTUdrNWVGaHBUV1psU2tJeFpVMXllVVZSYldkblUwb3pNSGxaYTBGVlVqQnZPVTlYU0VwQmJIQnlWbWhYTDJwdlYzUk5VR3BZVmpNcldXSkNiVU42TkRCTGJsSk5aMU5yYmxsaVNVRlpZVEZZWjFwTFZXcEJXbVlyUkVoTFpFZFdlRkptZDFCQk9YbExkV0ZEVEdaWlF6RnNNVTFWTlZkUFVqaFVXRmwyTTJSM09EQnNka0Z4ZUNzNE1XOVdNVVpGVDFCWlVYaENiRXhtWWxrekt6SXlZV2x0TTBZdksycDJaRXR3Tld0dFdUWm5iVXBPYlV0WGJsVnVRbWRNZWtrM2RWaE1hV3BQWVdaeUwzVnVVbk55ZG0xck5XTkJkMXBXVUV4NWRFUlBXRll6ZUhoalYyeFJjMVJVVmtGUFYwVkNWRTkzVDNCbVlqRjJibGgyVWxkT1FrVnhkSHBGUmpCSU9ERk5jVFl6TDJGYWIyaEpVM2R5UTNScVR6TjVRekZOVERodWJUVXhiR1ZvV0hGTFRtRlNTWEJ5WmxKeE15dE9hblYzY2pSNVZHdDRUMHd4WkhsaGIzaHNla3hwZUM4NVNHUXlkMlJDVEZwaVFsbHNUREF3VkhCbk1raHBhbEpHUzNSTGRGaE5NVVJLZVVKRmNrWXZOMHBtVjFrNGN6UkZlRkJtYkRONWVXbzRVRXRIYlZsVmIyRXlZbVZUVDFwb1QyMUdhRXhDU0ZkNFdXWnZNVEJOWVU5dFdXaFVWRTkyUmtSSFdrTkdiVGcwYVhZMk5TOVBTMDlSZEVaa2NrbDJZVmRPUjNKeFRtWTNZVEI2YlVreGFVSjBUbXRJU1dsV1dtNUxLelpJV25WUlZGWTVTbFU0ZW1OMGJESkpjM2RKT0hsUmJFTnVWek0xWm5FeWJGWklSa28xV2xaU0szZDNVR2g1UjNod04xaFlaemhoUTNaNmNVVTJSRm81YkVaSFlUbFZhMHBoZDFOV1lVSnZkMGRPYjNoSWJXUk9ObWRTSzJObWIybHRiWEZ3YldwcVZYTkpjMnRKWkhwdU1VeGhkVXgyVDB4aGJtVlNTV0ZDU1dSWlFVVktSMnBxZW5aMlNGUnBWR0ZJY3pOcFVEbEplamh1WkM5b2VrNVRNMWt4VWtKUWJqRXhaMVV4Ym5WelMycEROVkJETkRBellYVlBWVkpHT1ZnM01uWmtOa0l6TUdWUE1WQnZUSFZCVmk5bWIxWXpZazQzTkVkQmFuRjJUVUZHYmsxVFFuaHhZVkU0ZFNzeWVqaFpTM2xFTDBWVGFIRlNPRzlEUW1WRk5rbDJOVFFyYTBaVGVIRnhSbE5WZUU5eU56aFRjak5ZYTBOclowaFNVMk53YURWWVJuRXdTM015ZVhWUGRHUnZUak0wUWxKak9XeDBaVkU1TlVGM1pHd3pNMGhUUjJoWlptMTRTVGx2VkdZM2JYcFRXbWxSZDBSUlVIaEVXRTgwZERrelprZzJhSGRZU2tGWGJFVnlkMk00V1dwc01reE9WVTlxYlRkdFJIaHpUMFVyT0dnNGJFOTVUamMzVkZaTmJHOXVia1JwTTNkSE1scGlaMHhWYjJwMmNFbFZPVzlXTW1wRWJsb3JSME4zYWpBeE5WZFhRbmt4UTBobFFrNXJLemxZU0ZNeFIxTTRVbXR4TjNaVlptTlJlVWx3UjI5Nk1VMXBVRnAzYjNVNFQxcFFaRXd4VVhsT2FXUnZhREZIV1hGbldEUkZZalJKVlM4MFVHWlNWbUZ3WnpKVk9URkhjQzlKZUU1eVoyeDVSVzFSVTJwU1YzZFhSVFYxZFRka1JWSlhUbUpRYkhKMFdtaDFjM00zYmxoVU9YUnRZV3BqYUhSSmQwdGtiSEZKWTNwTGN6WnhTMnMyZW13dmJFWTRTRTVFWVdJdk5EbHJjMDlrV0VZemNGb3JhbXRyVDBoc2NrSldTbUpyYm5sMFFURnBhekppUTJwSGVrZFdjelYxTm1rM1RuZFBSM2MxWVZObFJIY3pVR2RIU1VkcE0ySnhTRms1TlhGU1FsVmlWbFZrYjFNMk1HcEJPVUYyZDBwQllXcDRaR2hZZFVFM1oxVldNaXRoZFhsemFXNHlkMGhYTmtwVGVWbEpZVGRCYVRFd1VIVlFlSFI1U1dNeUswMXhkVlprTkZWUlpVVkNiMngzV0dkaGVYZENTVW8xY0Zsd01GaDJRV3M1TDBGVldEbFliV1IyV0VwTk1HTkJVU3N3VVVKSFdYRTBVV3N2VjNadmFIRlZTRkJIWkVaSWJrbzRRMjVTYkRnNU5FazRWamREYzJGVVYxSnhWeTlFTVV4YWNqaDRTV2hyUjNweVJVSkVaRFoxVkhjMkswUjRjazlwZGtGS1ZuTXdlbFZ1VDFSeE9XdEZSemhRTDJWTWRURlpORGRVU1V3eVZXcGxOMDlhUlhOamMyNXFZekpqYzNoV2RDdEtjMmRwZG05c09GTk9kbEpETjNkVlkwVnJUbmgyYm1acUwwTkljVmhHVDFoUlQyRjFhVTg1VWpoeFRVWTNjVmx2ZWxCU0sxcHFabFpGTTNjNE9XWlFMMWMySzJSM2FrbGpXVVJOWkdnck5uaERia1ZMZHk4MFdXcG9iRTh5Y0RkNFQxZHRTVk0zYmxoUlR6bDNTWGQ0TjNCcU1rOXZhalJSY1ZSaVJGaDVUazFIVFRkamRYWlhaMVpyWjFGU1ZGa3djazlMU0VrNWVFNURRa05zZEdJcmJrMW1ha2RUZVRoeVMxZDFZVFJETTBkUU1FbHRkVTF0WW5CcGVXSmFSa2xYVlhOVGJIQllOMnBPTlhOb1VGZFJaMHBRZWtjemVsRkxSVmhGYVVwcVZ6TnlPVTkyZDFVemNYVkNjMGMxT1RCUVIwTXpkekpGY0hGNk5GbHJlRUZGWTBseFIwRnFXbHBYU2s5Q1ZERnBXRlpxUVcxWGNqa3lSM2QyTXpKVU1qQnlOamRzTkRGR1lrTnVWWGc0VGxWME1tMHpUMWxSZGxOeFJWZHBUR1ZoZVVaUlpHdHpZaTh4TDJOVVIwcGFhbkp4VmtwS09GaHdOMjFZUm10VlVuTnFWMmRzY2xGSlVtNU5ZVmRGVFhsMWJVWm1jR1U0VFRBM1VrcFJVVzQwUzFJdlNFcENkRWxhYVZVeVEwdGFiVzlQUkVsTWVHMUNhak5VVWxJd1pUZERSRmc0Ym5VMk1UbGpPRTlvVlcxQ2NYUjJjVXRUTTJVMEwyUTNLelJvV2xodWNIRm9NbmhHTjNoNVYzVXpjM3BoWVRCWFJEZGFTRmh0TVRVeWQyTjZWbEJEWlRsT1V6VjZRMkkwUWxocmF5dERRakJZUldWcVRFTldaVmxDTVZGelVYaGpVelIwVEhvcmQyMXZhSGR1YmpaaldscFhNelExTW1WRVZWaDVZbWRyYmtwVmVGcDZlRkZDWVhFNWJqZFlVekpIYTBWUGNtWm9kM05OUWtsM1JqTmFiRFJtU1dOVFVuVkNaMEpqV2pkTFZWVTkucVYzNDBDQnY5bFFHcmdMc1Yzc2NqYW00RVhkQzVyZVRiR1pLSHVKSThWUTJEYzQtREI1ZXVNeUlKTUoyRDBGUzdGM3ZMQ3BwQVRkRGc5aWNyb2VhY0E=
+    _eventId : submit
+
+在用POST方法将正确的表单数据上传之后，会跳转一个 URL ， 长这样：
+    https://jwjx.gxnu.edu.cn/sso/login/3rd/432?
+        referer=https://jwjx.gxnu.edu.cn/wfw/manage&
+            ticket=ST-1984093-0yN5whtdSWHA6QBzeAEc-zfsoft.com
+
+    其中的 ticket 就是 SSO 认证的票据，通过 URL 参数传给教务系统，教务系统会验证，
+    教务系统收到票据后，向CAS服务器验证票据有效性，验证通过后，教务系统创建用户会话，用户进入系统，
+    即会跳转到原来一开始跳转到SSO的网址：
+        referer 中的 https://jwjx.gxnu.edu.cn/wfw/manage
+
+教务系统成功认证后，会跳转 URL https://jwjx.gxnu.edu.cn/wfw/manage,
+    其中的响应头中的 set-Cookies 中登录有效期很可能有 wfwEnc = ... , Max-Age = 2592000 （30天）
+        中的 Max-Age 决定
+
+为了确保在程序退出之后还能够保持登录，注意将登录成功之后产生的 Cookies 保存，比如到json中，
+    其中最为重要的信息是似乎是 wfwEnc， 但建议保存所有的 Cookies 内容
+
+    保存代码示例如：
+        import requests, json
+
+        # 创建新会话
+        session = requests.Session()
+
+        ...
+
+        # 读取 Cookies
+        cookies_dicts = requests.utils.dict_from_cookiejar(session.cookies)
+
+        # 写入 Cookies
+        with open("login_cookies.json", 'w') as cookies_save_file:
+            json.dump(cookies_dicts, cookies_save_file, incident=4)
+
+
+    读取代码示例：
+        import requests,json
+
+        # 创建新会话
+        session = requests.Session()
+
+        # 读取 Cookies
+        with open("login_cookies.json", 'r') as cookies_save_file:
+            cookies_dicts = json.load(cookies_save_file)
+
+            # 加载 Cookies
+            session.cookies.update(cookies_dicts)
+
+        # 验证 Cookie 是否仍然有效
+        test_url = "https://jwjx.gxnu.edu.cn/wfw/manage"  # 一个需要登录的页面
+        response = session.get(test_url)
