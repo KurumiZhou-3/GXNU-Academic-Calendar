@@ -1,7 +1,3 @@
-import math
-from sys import executable
-
-
 def rsa_encrypt(password, exponent, modulus):
     """
     实现教务系统SSO登录的RSA加密逻辑
